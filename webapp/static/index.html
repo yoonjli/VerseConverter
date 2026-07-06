@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Scripture PPTX Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #080808;
+    --surface:   #101010;
+    --surface2:  #181818;
+    --border:    #2a2a2a;
+    --gold:      #d4af37;
+    --gold-dim:  #9a7e24;
+    --gold-glow: rgba(212,175,55,0.15);
+    --gold-soft: #f0d980;
+    --white:     #f5f0e8;
+    --muted:     #666;
+    --danger:    #c0392b;
+    --danger-bg: rgba(192,57,43,0.1);
+    --radius:    6px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'Crimson Text', Georgia, serif;
+    font-size: 18px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grain overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  /* ── Header ── */
+  header {
+    position: relative;
+    text-align: center;
+    padding: 56px 24px 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 2px;
+    background: var(--gold);
+  }
+  .header-ornament {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--gold-dim);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-family: 'Cinzel', serif;
+    font-size: clamp(24px, 4vw, 42px);
+    font-weight: 600;
+    color: var(--gold);
+    letter-spacing: 0.05em;
+    line-height: 1.2;
+    margin-bottom: 12px;
+  }
+  .subtitle {
+    font-family: 'IM Fell English', serif;
+    font-style: italic;
+    color: var(--muted);
+    font-size: 17px;
+  }
+
+  /* ── Main layout ── */
+  main {
+    position: relative;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+    z-index: 1;
+  }
+
+  /* ── Step indicator ── */
+  .steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 48px;
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-num {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    color: var(--muted);
+    transition: all 0.3s;
+    flex-shrink: 0;
+  }
+  .step-label {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    transition: color 0.3s;
+  }
+  .step-connector {
+    width: 48px; height: 1px;
+    background: var(--border);
+    margin: 0 12px;
+    flex-shrink: 0;
+  }
+  .step-item.active .step-num {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: var(--gold-glow);
+    box-shadow: 0 0 12px var(--gold-glow);
+  }
+  .step-item.active .step-label { color: var(--gold); }
+  .step-item.done .step-num {
+    border-color: var(--gold-dim);
+    background: var(--gold-dim);
+    color: var(--bg);
+  }
+  .step-item.done .step-label { color: var(--gold-dim); }
+
+  /* ── Section panels ── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    display: none;
+    animation: fadeUp 0.4s ease both;
+  }
+  .panel.visible { display: block; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .panel-title {
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Upload area ── */
+  .upload-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 600px) { .upload-grid { grid-template-columns: 1fr; } }
+
+  .upload-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s;
+    position: relative;
+    background: var(--surface2);
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--gold);
+    background: var(--gold-glow);
+  }
+  .upload-zone.has-file {
+    border-color: var(--gold-dim);
+    border-style: solid;
+  }
+  .upload-zone input[type="file"] {
+    position: absolute; inset: 0;
+    opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .upload-icon {
+    font-size: 28px;
+    margin-bottom: 10px;
+    opacity: 0.5;
+  }
+  .upload-zone.has-file .upload-icon { opacity: 1; }
+  .upload-lang {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 8px;
+  }
+  .upload-hint {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .upload-filename {
+    font-size: 14px;
+    color: var(--white);
+    margin-top: 6px;
+    word-break: break-all;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 13px 32px;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .btn-primary {
+    background: var(--gold);
+    color: #000;
+    font-weight: 600;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--gold-soft);
+    box-shadow: 0 0 20px var(--gold-glow);
+    transform: translateY(-1px);
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--gold);
+    border: 1.5px solid var(--gold-dim);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--gold-glow);
+    border-color: var(--gold);
+  }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+  .btn-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  /* ── Status / warnings ── */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    font-size: 15px;
+    margin-bottom: 20px;
+  }
+  .status-bar.info  { background: var(--gold-glow); border: 1px solid var(--gold-dim); color: var(--gold-soft); }
+  .status-bar.warn  { background: rgba(180,120,0,0.12); border: 1px solid #8a6010; color: #f0b030; }
+  .status-bar.error { background: var(--danger-bg); border: 1px solid var(--danger); color: #e74c3c; }
+
+  .stats-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .stat-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 14px;
+  }
+  .stat-chip .num {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: var(--gold);
+    font-weight: 600;
+  }
+  .stat-chip .lbl { color: var(--muted); }
+
+  /* ── Verse preview table ── */
+  .verse-table-wrap {
+    overflow-x: auto;
+    max-height: 520px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 24px;
+  }
+  .verse-table-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  .verse-table-wrap::-webkit-scrollbar-track { background: var(--surface2); }
+  .verse-table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  thead th {
+    background: var(--surface2);
+    padding: 12px 16px;
+    text-align: left;
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 2;
+  }
+  thead th:first-child { width: 64px; text-align: center; }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  td {
+    padding: 14px 16px;
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  td:first-child {
+    text-align: center;
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    color: var(--gold);
+    white-space: nowrap;
+    opacity: 0.8;
+  }
+  td.ko { color: var(--white); }
+  td.en { color: var(--gold-soft); }
+
+  /* ── Generate panel ── */
+  .generate-hero {
+    text-align: center;
+    padding: 20px 0 28px;
+  }
+  .generate-hero .big-num {
+    font-family: 'Cinzel', serif;
+    font-size: 64px;
+    color: var(--gold);
+    line-height: 1;
+    margin-bottom: 8px;
+    text-shadow: 0 0 40px var(--gold-glow);
+  }
+  .generate-hero .big-label {
+    font-family: 'IM Fell English', serif;
+    font-style: italic;
+    font-size: 20px;
+    color: var(--muted);
+    margin-bottom: 32px;
+  }
+  .generate-btn-wrap { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+
+  /* ── Loading spinner ── */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .spinner.visible { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Warning pills ── */
+  .warn-list {
+    background: rgba(180,120,0,0.08);
+    border: 1px solid #7a5010;
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #f0b030;
+    line-height: 1.8;
+  }
+  .warn-list strong {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  /* ── Footer ── */
+  footer {
+    position: relative;
+    text-align: center;
+    padding: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+    z-index: 1;
+    font-family: 'Cinzel', serif;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-ornament">✦ &nbsp; Bilingual Scripture &nbsp; ✦</div>
+  <h1>Scripture PPTX Generator</h1>
+  <p class="subtitle">Korean &amp; English — one slide per verse</p>
+</header>
+
+<main>
+
+  <!-- Step indicator -->
+  <div class="steps">
+    <div class="step-item active" id="step-1">
+      <div class="step-num">1</div>
+      <div class="step-label">Upload</div>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step-item" id="step-2">
+      <div class="step-num">2</div>
+      <div class="step-label">Preview</div>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step-item" id="step-3">
+      <div class="step-num">3</div>
+      <div class="step-label">Generate</div>
+    </div>
+  </div>
+
+  <!-- Panel 1: Upload -->
+  <div class="panel visible" id="panel-upload">
+    <div class="panel-title">✦ &nbsp; Step 1 — Upload Scripture Files</div>
+
+    <div class="upload-grid">
+      <!-- Korean -->
+      <div class="upload-zone" id="zone-ko" ondragover="onDrag(event,'ko')" ondragleave="offDrag('ko')" ondrop="onDrop(event,'ko')">
+        <input type="file" accept=".txt" id="file-ko" onchange="onFileSelect('ko')">
+        <div class="upload-icon" id="icon-ko">📖</div>
+        <div class="upload-lang">Korean</div>
+        <div class="upload-hint" id="hint-ko">Drag &amp; drop or click<br>to select .txt file</div>
+        <div class="upload-filename" id="name-ko"></div>
+      </div>
+
+      <!-- English -->
+      <div class="upload-zone" id="zone-en" ondragover="onDrag(event,'en')" ondragleave="offDrag('en')" ondrop="onDrop(event,'en')">
+        <input type="file" accept=".txt" id="file-en" onchange="onFileSelect('en')">
+        <div class="upload-icon" id="icon-en">📖</div>
+        <div class="upload-lang">English</div>
+        <div class="upload-hint" id="hint-en">Drag &amp; drop or click<br>to select .txt file</div>
+        <div class="upload-filename" id="name-en"></div>
+      </div>
+    </div>
+
+    <div id="upload-error" class="status-bar error" style="display:none"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-parse" onclick="doParse()" disabled>
+        <span>Parse &amp; Preview</span>
+        <div class="spinner" id="spin-parse"></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- Panel 2: Preview -->
+  <div class="panel" id="panel-preview">
+    <div class="panel-title">✦ &nbsp; Step 2 — Verify Verse Matching</div>
+
+    <div class="stats-row" id="stats-row"></div>
+    <div id="warn-block"></div>
+
+    <div class="verse-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Verse</th>
+            <th>Korean</th>
+            <th>English</th>
+          </tr>
+        </thead>
+        <tbody id="verse-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="goGenerate()">Continue to Generate →</button>
+      <button class="btn btn-secondary" onclick="goBack()">← Upload Again</button>
+    </div>
+  </div>
+
+  <!-- Panel 3: Generate -->
+  <div class="panel" id="panel-generate">
+    <div class="panel-title">✦ &nbsp; Step 3 — Generate Presentation</div>
+
+    <div class="generate-hero">
+      <div class="big-num" id="gen-count">—</div>
+      <div class="big-label">slides ready to build</div>
+      <div class="generate-btn-wrap">
+        <button class="btn btn-primary" id="btn-generate" onclick="doGenerate()">
+          <span>Download PPTX</span>
+          <div class="spinner" id="spin-gen"></div>
+        </button>
+        <button class="btn btn-secondary" onclick="goBack2()">← Back to Preview</button>
+      </div>
+    </div>
+
+    <div id="gen-error" class="status-bar error" style="display:none"></div>
+    <div id="gen-success" class="status-bar info" style="display:none"></div>
+  </div>
+
+</main>
+
+<footer>Scripture PPTX Generator &nbsp;·&nbsp; Korean / English Bilingual</footer>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────
+  const state = { koFile: null, enFile: null, parsed: null };
+
+  // ── File handling ────────────────────────────────────────────────────
+  function onFileSelect(lang) {
+    const input = document.getElementById(`file-${lang}`);
+    if (input.files[0]) setFile(lang, input.files[0]);
+  }
+
+  function onDrag(e, lang) {
+    e.preventDefault();
+    document.getElementById(`zone-${lang}`).classList.add('drag-over');
+  }
+  function offDrag(lang) {
+    document.getElementById(`zone-${lang}`).classList.remove('drag-over');
+  }
+  function onDrop(e, lang) {
+    e.preventDefault();
+    offDrag(lang);
+    const file = e.dataTransfer.files[0];
+    if (file) setFile(lang, file);
+  }
+
+  function setFile(lang, file) {
+    state[`${lang}File`] = file;
+    const zone = document.getElementById(`zone-${lang}`);
+    zone.classList.add('has-file');
+    document.getElementById(`icon-${lang}`).textContent = '✓';
+    document.getElementById(`hint-${lang}`).textContent = 'File selected';
+    document.getElementById(`name-${lang}`).textContent = file.name;
+    document.getElementById('upload-error').style.display = 'none';
+    checkReady();
+  }
+
+  function checkReady() {
+    document.getElementById('btn-parse').disabled = !(state.koFile && state.enFile);
+  }
+
+  // ── Parse ─────────────────────────────────────────────────────────────
+  async function doParse() {
+    setLoading('parse', true);
+    document.getElementById('upload-error').style.display = 'none';
+
+    const fd = new FormData();
+    fd.append('korean', state.koFile);
+    fd.append('english', state.enFile);
+
+    try {
+      const res = await fetch('/parse', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Parse failed');
+      state.parsed = data;
+      renderPreview(data);
+      setStep(2);
+    } catch (err) {
+      showError('upload-error', '⚠ ' + err.message);
+    } finally {
+      setLoading('parse', false);
+    }
+  }
+
+  function renderPreview(data) {
+    // Stats
+    const sr = document.getElementById('stats-row');
+    sr.innerHTML = `
+      <div class="stat-chip"><span class="num">${data.ko_count}</span><span class="lbl">Korean verses</span></div>
+      <div class="stat-chip"><span class="num">${data.en_count}</span><span class="lbl">English verses</span></div>
+      <div class="stat-chip"><span class="num">${data.matched_count}</span><span class="lbl">Matched pairs</span></div>
+    `;
+
+    // Warnings
+    const wb = document.getElementById('warn-block');
+    let warns = '';
+    if (data.only_ko.length)
+      warns += `<strong>⚠ Korean-only (no English match)</strong>${data.only_ko.join(', ')}`;
+    if (data.only_en.length)
+      warns += `<strong>⚠ English-only (no Korean match)</strong>${data.only_en.join(', ')}`;
+    wb.innerHTML = warns ? `<div class="warn-list">${warns}</div>` : '';
+
+    // Table
+    const tbody = document.getElementById('verse-tbody');
+    tbody.innerHTML = data.matched.map(v => `
+      <tr>
+        <td>${v.num}</td>
+        <td class="ko">${escHtml(v.text_ko)}</td>
+        <td class="en">${escHtml(v.text_en)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // ── Navigate ──────────────────────────────────────────────────────────
+  function goGenerate() {
+    document.getElementById('gen-count').textContent = state.parsed.matched_count;
+    document.getElementById('gen-error').style.display = 'none';
+    document.getElementById('gen-success').style.display = 'none';
+    setStep(3);
+  }
+
+  function goBack()  { setStep(1); }
+  function goBack2() { setStep(2); }
+
+  // ── Generate ──────────────────────────────────────────────────────────
+  async function doGenerate() {
+    setLoading('gen', true);
+    document.getElementById('gen-error').style.display = 'none';
+    document.getElementById('gen-success').style.display = 'none';
+    document.getElementById('btn-generate').disabled = true;
+
+    const fd = new FormData();
+    fd.append('korean', state.koFile);
+    fd.append('english', state.enFile);
+
+    try {
+      const res = await fetch('/generate', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Generation failed');
+      }
+
+      // Trigger download
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const fnMatch = cd.match(/filename="?([^"]+)"?/);
+      const filename = fnMatch ? fnMatch[1] : 'scripture_bilingual.pptx';
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+
+      const s = document.getElementById('gen-success');
+      s.textContent = `✓ ${state.parsed.matched_count} slides saved as "${filename}"`;
+      s.style.display = 'flex';
+    } catch (err) {
+      showError('gen-error', '⚠ ' + err.message);
+    } finally {
+      setLoading('gen', false);
+      document.getElementById('btn-generate').disabled = false;
+    }
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────
+  function setStep(n) {
+    ['panel-upload','panel-preview','panel-generate'].forEach((id, i) => {
+      document.getElementById(id).classList.toggle('visible', i + 1 === n);
+    });
+    [1, 2, 3].forEach(i => {
+      const el = document.getElementById(`step-${i}`);
+      el.classList.toggle('active', i === n);
+      el.classList.toggle('done', i < n);
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function setLoading(key, on) {
+    document.getElementById(`spin-${key}`).classList.toggle('visible', on);
+    document.getElementById(`btn-${key === 'gen' ? 'generate' : 'parse'}`).disabled = on;
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = 'flex';
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
