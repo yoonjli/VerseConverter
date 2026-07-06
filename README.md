@@ -142,3 +142,20 @@ Matching verses by number...
   → 9 matched pairs
 ✓ Saved 9 slides → genesis11.pptx
 ```
+
+---
+
+## Example Input Files
+
+Sample input files are provided in the [`examples/`](examples/) folder:
+
+| File | Description |
+|---|---|
+| `examples/Thess2_Eng.txt` | 1 Thessalonians 2:1–14 (English, NIV) |
+| `examples/Thess2_kor.txt` | 1 Thessalonians 2:1–20 (Korean, 새번역) |
+
+Try them out:
+
+```bash
+python verseconverter_txtfilein_v2.py examples/Thess2_kor.txt examples/Thess2_Eng.txt thess2.pptx
+```
