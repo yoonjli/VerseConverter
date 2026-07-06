@@ -153,6 +153,7 @@ Sample input files are provided in the [`examples/`](examples/) folder:
 |---|---|
 | `examples/Thess2_Eng.txt` | 1 Thessalonians 2:1–14 (English, NIV) |
 | `examples/Thess2_kor.txt` | 1 Thessalonians 2:1–20 (Korean, 새번역) |
+| `examples/Thess2_v4.ppt` | Example output slide deck (bilingual) |
 
 Try them out:
 
