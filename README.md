@@ -1,156 +1,144 @@
 # VerseConverter
 
-Generate bilingual Korean/English PowerPoint slides from plain text input — built for sermon and Bible study presentations at Evergreen Church.
+Generate bilingual Korean/English PowerPoint slides from plain text scripture input — built for sermon and Bible study presentations.
 
 ---
 
 ## Overview
 
-VerseConverter takes structured `.txt` files containing Korean and English scripture or sermon content and outputs formatted `.pptx` slide decks. It supports two generation modes:
-
-- **Bilingual verse matching** — pairs Korean and English verses by reference, one slide per verse
-- **Section-based slides** — free-form content split into slides using `###` delimiters
-
-A **FastAPI web app** provides a browser-based interface so non-technical users can paste text and download a deck without touching the command line.
+VerseConverter takes two plain-text files (Korean and English scripture) and outputs a formatted `.pptx` slide deck with one slide per verse. Korean and English are automatically matched by chapter:verse number and laid out on the same slide with distinct styling.
 
 ---
 
-## Features
+## Usage
 
-- Bilingual text layout with Korean and English on the same slide
-- Automatic verse reference detection and deduplication
-- Mixed Korean/English inline text with per-language color styling
-- Section delimiter (`###`) support for multi-topic or sermon outline decks
-- Configurable fonts: `리디바탕` / `Batang` (Korean), `Georgia` (English)
-- FastAPI web app with live preview
-- Python 3.9+ compatible
+```bash
+python verseconverter_txtfilein_v2.py korean.txt english.txt [output.pptx]
+```
+
+| Argument | Description |
+|---|---|
+| `korean.txt` | Korean scripture text file |
+| `english.txt` | English scripture text file |
+| `output.pptx` | *(optional)* Output filename. Defaults to `bilingual_scripture.pptx` |
 
 ---
 
-## Project Structure
+## Input Format
+
+Each text file follows **Layout A** — verse text appears *before* its reference line. The reference must end with a `chapter:verse` number (e.g. `26:1`).
 
 ```
-VerseConverter/
-├── make_bilingual_pptx.py   # CLI: verse-matched bilingual slides
-├── make_section_pptx.py     # CLI: section-delimited slides (v1)
-├── make_section_pptx_v2.py  # CLI: section-delimited slides (v2, recommended)
-├── app.py                   # FastAPI web application
-├── requirements.txt
-└── README.md
+태초에 하나님이 천지를 창조하시니라
+창세기 1:1
+
+땅이 혼돈하고 공허하며 흑암이 깊음 위에 있고
+창세기 1:2
 ```
+
+```
+In the beginning God created the heavens and the earth.
+Genesis 1:1
+
+Now the earth was formless and empty, darkness was over the surface of the deep.
+Genesis 1:2
+```
+
+**Notes:**
+- Blank lines between verses are ignored
+- Long verses split across multiple lines are automatically joined
+- Trailing text after the final reference is appended to the last verse
+- Verses with no match in the other language are reported as warnings but do not cause errors
+
+---
+
+## Matching & Merging Logic
+
+1. **Parse** — Each file is scanned for lines matching `BookName chapter:verse`. Text accumulated before each reference is assigned to that verse.
+2. **Merge duplicates** — Consecutive entries sharing the same `chapter:verse` number are joined into a single verse (handles source files where one verse spans multiple blocks).
+3. **Match** — Korean and English verses are paired by `chapter:verse` number. Unmatched verses are printed as warnings (`⚠ Korean-only` / `⚠ English-only`).
+
+---
+
+## Slide Layout
+
+Each slide follows this structure (widescreen 13.33" × 7.5"):
+
+```
+┌─────────────────────────────────────────┐
+│▓▓▓▓▓▓▓▓▓▓  gold top bar  ▓▓▓▓▓▓▓▓▓▓▓▓▓│
+│                                         │
+│       창세기 1:1  /  Genesis 1:1        │  ← gold, 27pt, Malgun Gothic
+│                                         │
+│         Korean verse text here          │  ← white, 36pt, Malgun Gothic
+│                                         │
+│          ───────────────                │  ← gold divider
+│                                         │
+│         English verse text here         │  ← light gold, 36pt, Georgia
+│                                         │
+│▓▓▓▓▓▓▓▓▓▓  gold bottom bar  ▓▓▓▓▓▓▓▓▓▓│
+└─────────────────────────────────────────┘
+```
+
+### Colors
+
+| Element | Color | Hex |
+|---|---|---|
+| Background | Black | `#000000` |
+| Top/bottom bars, divider, reference | Gold | `#D4AF37` |
+| Korean body text | White | `#FFFFFF` |
+| English body text | Light gold | `#F0D980` |
+
+### Fonts
+
+| Text | Font |
+|---|---|
+| Korean (reference + body) | Malgun Gothic |
+| English body | Georgia |
+
+> Font selection is automatic: any text containing non-ASCII characters uses Malgun Gothic; pure ASCII text uses Georgia.
 
 ---
 
 ## Requirements
 
 ```
-python-pptx
-fastapi
-uvicorn
+python-pptx>=0.6.21
 ```
 
 Install with:
 
 ```bash
-pip install -r requirements.txt
+pip install python-pptx
 ```
-
-> **Mac note:** If `uvicorn` is not found after install, run it as `python -m uvicorn` or add your Python bin directory to `PATH`.
-
----
-
-## Usage
-
-### CLI — Bilingual Verse Matching
-
-```bash
-python make_bilingual_pptx.py --ko korean_verses.txt --en english_verses.txt --out output.pptx
-```
-
-Input format (one verse per line, reference first):
-
-```
-창세기 1:1 태초에 하나님이 천지를 창조하시니라
-창세기 1:2 땅이 혼돈하고 공허하며 흑암이 깊음 위에 있고
-```
-
-```
-Genesis 1:1 In the beginning God created the heavens and the earth.
-Genesis 1:2 Now the earth was formless and empty...
-```
-
-Verses are automatically matched by reference and merged onto the same slide. Duplicate references are consolidated.
-
----
-
-### CLI — Section-Based Slides
-
-```bash
-python make_section_pptx_v2.py --input content.txt --out output.pptx
-```
-
-Use `###` on its own line to mark slide boundaries:
-
-```
-첫 번째 포인트 / First Point
-This is the body text for slide one.
-###
-두 번째 포인트 / Second Point
-Body text for slide two.
-```
-
-Lines containing both Korean and English (e.g. `한국어 / English`) are automatically split and colored per language.
-
----
-
-### Web App
-
-```bash
-uvicorn app:app --reload
-```
-
-Or if `uvicorn` is not on your PATH:
-
-```bash
-python -m uvicorn app:app --reload
-```
-
-Open `http://localhost:8000` in your browser. Paste Korean and English text into the form, select the generation mode, and download the resulting `.pptx`.
-
----
-
-## Slide Styling
-
-| Element             | Style                                      |
-|---------------------|--------------------------------------------|
-| Background          | Black (`#000000`)                          |
-| Verse reference     | Gold (`#D4A017`), bold                     |
-| Korean body text    | White (`#FFFFFF`)                          |
-| English body text   | Light gray / gold (`#CCCCCC` / `#EDD28A`) |
-| Korean font         | 리디바탕 → Batang (fallback)               |
-| English font        | Georgia                                    |
 
 ---
 
 ## Key Functions
 
-| Function | File | Description |
-|---|---|---|
-| `parse_verses()` | `make_bilingual_pptx.py` | Parses reference + text from each line |
-| `merge_duplicate_refs()` | `make_bilingual_pptx.py` | Consolidates repeated verse refs |
-| `match_verses()` | `make_bilingual_pptx.py` | Pairs KO and EN verses by reference |
-| `split_ko_en_line()` | `make_section_pptx_v2.py` | Splits mixed-language lines for inline coloring |
+| Function | Description |
+|---|---|
+| `parse_verses(filepath)` | Reads a scripture `.txt` file; returns a list of `(reference, text)` tuples |
+| `extract_verse_num(ref)` | Extracts the bare `chapter:verse` digits from a full reference string |
+| `match_verses(ko_verses, en_verses)` | Pairs KO and EN verse lists by `chapter:verse`; reports unmatched entries |
+| `make_slide(prs, ref_ko, korean, ref_en, english)` | Adds one bilingual slide to the presentation |
+| `add_textbox(slide, ...)` | Helper to add a styled text box with font, size, color, and alignment |
+| `add_bg(slide, color)` | Sets the slide background to a solid color |
 
 ---
 
-## Notes
+## Example
 
-- Python 3.9 compatibility: the codebase uses `from __future__ import annotations` where needed for deferred type hints.
-- Font availability: `리디바탕` must be installed on the system for Korean rendering. Download from [RIDIBatang](https://github.com/ridi/ridicorp/tree/master/fonts/RIDIBatang). Batang is the fallback on most Korean Windows/Mac systems.
-- Output files are written to the same directory as the script unless `--out` specifies a different path.
+```bash
+python verseconverter_txtfilein_v2.py genesis11_ko.txt genesis11_en.txt genesis11.pptx
+```
 
----
-
-## Example Output
-
-Slides generated by this tool follow the visual style used for Evergreen Church sermon presentations — bilingual titles, gold verse references, white Korean body text, and English subtitles below.
+```
+Parsing genesis11_ko.txt ...
+  → 9 verses after merging
+Parsing genesis11_en.txt ...
+  → 9 verses after merging
+Matching verses by number...
+  → 9 matched pairs
+✓ Saved 9 slides → genesis11.pptx
+```
