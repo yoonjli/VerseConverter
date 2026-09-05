@@ -1,0 +1,39 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "make_bilingual_pptx.py"
+      - "gui.py"
+      - "requirements.txt"
+      - ".github/workflows/build-windows-exe.yml"
+  workflow_dispatch: {}   # lets you trigger a build manually from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --name BilingualSlideMaker --collect-data pptx gui.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BilingualSlideMaker-windows
+          path: dist/BilingualSlideMaker.exe
