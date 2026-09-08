@@ -217,3 +217,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 *.pptx
+*.txt
+*.ppt
+files.zip
+README_old.md
+make_bilingual_pptx_v1.py

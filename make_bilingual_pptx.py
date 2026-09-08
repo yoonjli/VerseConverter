@@ -1,5 +1,6 @@
 import sys
 import re
+from fix_josa import fix_josa_spacing
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
@@ -75,7 +76,7 @@ def parse_verses_from_lines(lines):
         else:
             merged.append([ref, text])
 
-    return [(ref, text.strip()) for ref, text in merged]
+    return [(ref, fix_josa_spacing(text.strip())) for ref, text in merged]
 
 
 def parse_verses(filepath):
