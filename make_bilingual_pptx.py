@@ -185,7 +185,7 @@ def add_textbox(slide, text, left, top, width, height,
     run.font.bold = bold
     run.font.color.rgb = color
     run.font.name = font_name or (
-        "Malgun Gothic" if any(ord(c) > 127 for c in text) else "Georgia"
+        "RIDIBatangSHL" if any(ord(c) > 127 for c in text) else "Georgia"
     )
 
 
@@ -203,12 +203,12 @@ def make_slide(prs, ref_ko, korean, ref_en, english):
     ref_label = f"{ref_ko}  /  {ref_en}"
     add_textbox(slide, ref_label, m, Inches(0.15), W - m * 2, Inches(0.55),
                 font_size=27, bold=True, color=GOLD, align=PP_ALIGN.CENTER,
-                font_name="Malgun Gothic")
+                font_name="RIDIBatangSHL")
 
     # Korean text (top half)
     add_textbox(slide, korean, m, Inches(0.85), W - m * 2, Inches(2.9),
                 font_size=36, color=WHITE, align=PP_ALIGN.CENTER,
-                font_name="Malgun Gothic")
+                font_name="RIDIBatangSHL")
 
     # Divider
     div = slide.shapes.add_shape(1, Inches(1.5), Inches(3.85), W - Inches(3.0), Inches(0.04))
