@@ -165,6 +165,98 @@ SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
 
 
+# ── Overflow estimation ────────────────────────────────────────────────
+# python-pptx cannot measure rendered text, so we ESTIMATE how many lines a
+# verse needs and compare with how many lines fit in its text box. Numbers
+# are calibrated against a real render (36pt, 12.03in-wide box -> 4 Korean
+# lines fit; a 5th line spills over the gold divider).
+BODY_FONT_PT   = 36
+MARGIN         = Inches(0.65)
+BOX_H_IN       = 2.9          # height of each Korean / English text box
+BOX_INSET_H_IN = 0.1          # PowerPoint default left/right text inset
+BOX_INSET_V_IN = 0.05         # PowerPoint default top/bottom text inset
+KO_LINE_FACTOR = 1.30         # line height = font size x factor (Korean font)
+EN_LINE_FACTOR = 1.20         # (Georgia)
+OPENERS        = set("\u201c\u2018([\"'")
+
+
+def _char_em(ch):
+    """Approximate glyph width in em."""
+    if '\uac00' <= ch <= '\ud7a3' or '\u3131' <= ch <= '\u318e' or '\u4e00' <= ch <= '\u9fff':
+        return 0.95
+    if ch == ' ':
+        return 0.25
+    if ch in "iljtf.,;:'!|\u2019\u2018":
+        return 0.30
+    if ch in "\u201c\u201d\"":
+        return 0.40
+    if ch in "mwMW":
+        return 0.85
+    if ch.isdigit():
+        return 0.55
+    if ch.isupper():
+        return 0.70
+    return 0.50
+
+
+def _units(word):
+    """Split a word into unbreakable units: each Hangul syllable is its own
+    unit (PowerPoint wraps Korean mid-word); punctuation/Latin sticks to the
+    previous unit; an opening quote sticks to the next syllable."""
+    units = []
+    for ch in word:
+        is_hangul = '\uac00' <= ch <= '\ud7a3'
+        if not units:
+            units.append(ch)
+        elif is_hangul:
+            if all(c in OPENERS for c in units[-1]):
+                units[-1] += ch
+            else:
+                units.append(ch)
+        else:
+            units[-1] += ch
+    return units
+
+
+def estimate_line_count(text, font_pt, box_width_in):
+    max_w = (box_width_in - 2 * BOX_INSET_H_IN) * 72
+    space_w = _char_em(' ') * font_pt
+    lines, cur = 1, 0.0
+    for wi, word in enumerate(text.split()):
+        if wi > 0 and cur > 0:
+            cur += space_w
+        for unit in _units(word):
+            w = sum(_char_em(c) for c in unit) * font_pt
+            if cur + w > max_w and cur > 0:
+                lines += 1
+                cur = w
+            else:
+                cur += w
+    return lines
+
+
+def max_lines_that_fit(font_pt, line_factor):
+    usable = (BOX_H_IN - 2 * BOX_INSET_V_IN) * 72
+    return int(usable // (font_pt * line_factor))
+
+
+MIN_FONT_PT  = 24     # never shrink below this (still readable when projected)
+FONT_STEP_PT = 2
+
+
+def fit_font_size(text, line_factor, start_pt=BODY_FONT_PT, min_pt=MIN_FONT_PT):
+    """Largest font size (start_pt, start_pt-2, ... min_pt) at which `text`
+    is estimated to fit its box. Returns (size_pt, fits).
+    If nothing down to min_pt fits, returns (min_pt, False)."""
+    box_w_in = (SLIDE_W - MARGIN * 2) / 914400
+    size = start_pt
+    while size >= min_pt:
+        if estimate_line_count(text, size, box_w_in) <= max_lines_that_fit(size, line_factor):
+            return size, True
+        size -= FONT_STEP_PT
+    return min_pt, False
+
+
 def add_bg(slide, color):
     fill = slide.background.fill
     fill.solid()
@@ -193,7 +285,7 @@ def make_slide(prs, ref_ko, korean, ref_en, english):
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
     add_bg(slide, BLACK)
     W, H = SLIDE_W, SLIDE_H
-    m = Inches(0.65)
+    m = MARGIN
 
     # Top gold bar
     b = slide.shapes.add_shape(1, Inches(0), Inches(0), W, Inches(0.07))
@@ -205,9 +297,14 @@ def make_slide(prs, ref_ko, korean, ref_en, english):
                 font_size=27, bold=True, color=GOLD, align=PP_ALIGN.CENTER,
                 font_name="RIDIBatangSHL")
 
+    # Pick a font size per section: normal size if it fits, otherwise shrink
+    # step by step until the estimate says it fits (or MIN_FONT_PT is reached).
+    ko_size, ko_fits = fit_font_size(korean, KO_LINE_FACTOR)
+    en_size, en_fits = fit_font_size(english, EN_LINE_FACTOR)
+
     # Korean text (top half)
     add_textbox(slide, korean, m, Inches(0.85), W - m * 2, Inches(2.9),
-                font_size=36, color=WHITE, align=PP_ALIGN.CENTER,
+                font_size=ko_size, color=WHITE, align=PP_ALIGN.CENTER,
                 font_name="RIDIBatangSHL")
 
     # Divider
@@ -216,12 +313,55 @@ def make_slide(prs, ref_ko, korean, ref_en, english):
 
     # English text (bottom half)
     add_textbox(slide, english, m, Inches(4.0), W - m * 2, Inches(2.9),
-                font_size=36, color=LIGHT_GOLD, align=PP_ALIGN.CENTER,
+                font_size=en_size, color=LIGHT_GOLD, align=PP_ALIGN.CENTER,
                 font_name="Georgia")
 
     # Bottom gold bar
     b2 = slide.shapes.add_shape(1, Inches(0), H - Inches(0.07), W, Inches(0.07))
     b2.fill.solid(); b2.fill.fore_color.rgb = GOLD; b2.line.fill.background()
+
+    # Record (and print) every adjustment so the user can review those slides.
+    # Printing means the GUI's on-screen log shows it too.
+    slide_no = len(prs.slides)
+    adjustments = []
+    for section, size, fits in (("Korean", ko_size, ko_fits), ("English", en_size, en_fits)):
+        if size != BODY_FONT_PT or not fits:
+            adjustments.append({
+                "slide": slide_no, "ref_ko": ref_ko, "ref_en": ref_en,
+                "section": section, "from_pt": BODY_FONT_PT, "to_pt": size,
+                "still_overflows": not fits,
+            })
+            if fits:
+                print(f"  ⚠  Slide {slide_no} ({ref_ko} / {ref_en}): {section} font shrunk "
+                      f"{BODY_FONT_PT}pt → {size}pt to fit - please review")
+            else:
+                print(f"  ✗  Slide {slide_no} ({ref_ko} / {ref_en}): {section} text may STILL "
+                      f"overflow at the minimum {size}pt - please edit or split this verse")
+    return adjustments
+
+
+def print_review_summary(adjustments):
+    """Print the end-of-run list of slides the user should open and confirm.
+    `adjustments` is the combined list returned by make_slide() calls."""
+    if not adjustments:
+        print("\n✓ No font adjustments were needed (estimate - a quick visual check is still wise).")
+        return
+    shrunk = [a for a in adjustments if not a["still_overflows"]]
+    stuck  = [a for a in adjustments if a["still_overflows"]]
+    print("\n" + "=" * 64)
+    print("REVIEW NEEDED - please open these slides and confirm they look right")
+    print("=" * 64)
+    if shrunk:
+        print(f"\nFont was SHRUNK on {len({a['slide'] for a in shrunk})} slide(s):")
+        for a in shrunk:
+            print(f"  • Slide {a['slide']:>3}  {a['ref_ko']} / {a['ref_en']}  "
+                  f"[{a['section']}]  {a['from_pt']}pt → {a['to_pt']}pt")
+    if stuck:
+        print(f"\nStill may OVERFLOW even at {MIN_FONT_PT}pt on {len({a['slide'] for a in stuck})} slide(s) "
+              f"(edit text or split the verse):")
+        for a in stuck:
+            print(f"  • Slide {a['slide']:>3}  {a['ref_ko']} / {a['ref_en']}  [{a['section']}]")
+    print("\nNote: sizes are estimated, not measured. Slides not listed should still get a quick look.")
 
 
 def main():
@@ -249,11 +389,13 @@ def main():
     prs.slide_width  = SLIDE_W
     prs.slide_height = SLIDE_H
 
+    adjustments = []
     for ref_ko, text_ko, ref_en, text_en in pairs:
-        make_slide(prs, ref_ko, text_ko, ref_en, text_en)
+        adjustments.extend(make_slide(prs, ref_ko, text_ko, ref_en, text_en) or [])
 
     prs.save(out_file)
     print(f"✓ Saved {len(pairs)} slides → {out_file}")
+    print_review_summary(adjustments)
 
 
 if __name__ == "__main__":
