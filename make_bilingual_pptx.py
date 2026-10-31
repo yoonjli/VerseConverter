@@ -31,52 +31,79 @@ def extract_verse_num(ref):
     return m.group(1) if m else ref
 
 
+def book_name(ref):
+    """'1 Corinthians 2:1' -> '1 Corinthians'"""
+    return re.sub(r'\s*\d+:\d+\s*$', '', ref).strip()
+
+
 def parse_verses_from_lines(lines):
     """
-    Parse a list of stripped, non-blank lines into a list of (reference, text) tuples.
+    Parse stripped, non-blank lines into a list of (reference, text, key).
 
-    Format expected (Layout A — text before reference):
-        Some verse text here...
-        BookName 26:1
-        Next verse text...
-        BookName 26:2
+    Works with ANY mix of layouts, even inside one file:
+        text / reference      (reference AFTER its text)
+        reference / text      (reference BEFORE its text)
 
-    Handles split verses: if the same reference number appears multiple times
-    (because a long verse was broken across lines in the source), all text
-    fragments are joined into a single entry.
+    How: lines are grouped into alternating items - REF lines and TEXT chunks
+    (consecutive text lines = one chunk, so a verse broken across lines is
+    fine). Every reference must own exactly one adjacent text chunk, and
+    scanning left to right there is only one way to do that: the first item
+    pairs with its right neighbour, then the next unpaired item, and so on.
 
-    Also handles trailing text after the final reference (appended to last verse).
+    `key` = (book_number, chapter, verse). The book number counts how many
+    times the book name changed, so "Matthew 2:1" and "1 Corinthians 2:1"
+    no longer collide, and Korean/English books line up by ORDER even though
+    their names differ.
+
+    Split verses (same reference appearing more than once in a row) are
+    merged into one entry.
     """
-    # --- Pass 1: collect (ref, text_before_ref) segments ---
-    segments = []   # list of [ref_string, text_string]
-    pending = []    # text lines accumulated before next ref
-
+    # --- Build items: ("R", ref_line) or ("T", [text lines]) ---
+    items = []
     for line in lines:
+        if line.lower().startswith("title:"):      # file header, not a verse
+            continue
         if REF_PATTERN.match(line):
-            segments.append([line.strip(), " ".join(pending).strip()])
-            pending = []
+            items.append(["R", line.strip()])
+        elif items and items[-1][0] == "T":
+            items[-1][1].append(line)
         else:
-            pending.append(line)
+            items.append(["T", [line]])
 
-    # Trailing text after the last reference — append to last segment
-    if pending and segments:
-        trailing = " ".join(pending).strip()
-        if trailing:
-            segments[-1][1] = (segments[-1][1] + " " + trailing).strip()
+    # --- Pair each reference with its adjacent text chunk ---
+    segments = []          # [ref, text]
+    i = 0
+    while i < len(items):
+        if i + 1 < len(items) and items[i][0] != items[i + 1][0]:
+            ref_item, text_item = (items[i], items[i + 1]) if items[i][0] == "R" \
+                                  else (items[i + 1], items[i])
+            segments.append([ref_item[1], " ".join(text_item[1]).strip()])
+            i += 2
+        else:
+            what = "reference" if items[i][0] == "R" else "text"
+            shown = items[i][1] if items[i][0] == "R" else " ".join(items[i][1])[:40]
+            print(f"  ✗  Could not pair this {what} with a verse (skipped): {shown!r}")
+            i += 1
 
-    # Drop segments with empty text
-    segments = [[r, t] for r, t in segments if t]
-
-    # --- Pass 2: merge consecutive segments with the same verse number ---
+    # --- Merge consecutive segments with the same book + verse number ---
     merged = []
     for ref, text in segments:
-        num = extract_verse_num(ref)
-        if merged and extract_verse_num(merged[-1][0]) == num:
-            merged[-1][1] = merged[-1][1] + " " + text
+        if merged and merged[-1][0] == ref:
+            merged[-1][1] += " " + text
         else:
             merged.append([ref, text])
 
-    return [(ref, fix_josa_spacing(text.strip())) for ref, text in merged]
+    # --- Assign keys (book order, chapter, verse) ---
+    out = []
+    book_idx, last_book = 0, None
+    for ref, text in merged:
+        bk = book_name(ref)
+        if last_book is not None and bk != last_book:
+            book_idx += 1
+        last_book = bk
+        ch, vs = map(int, extract_verse_num(ref).split(':'))
+        out.append((ref, fix_josa_spacing(text.strip()), (book_idx, ch, vs)))
+    return out
 
 
 def parse_verses(filepath):
@@ -94,7 +121,7 @@ def split_bilingual_file(filepath):
     """
     with open(filepath, encoding='utf-8') as f:
         lines = [l.strip() for l in f.readlines()]
-    lines = [l for l in lines if l]
+    lines = [l for l in lines if l and not l.lower().startswith("title:")]
 
     boundary = None
     for i, line in enumerate(lines):
@@ -109,49 +136,35 @@ def split_bilingual_file(filepath):
             "followed later by English references (e.g. 'Acts 15:1')."
         )
 
-    ko_lines = lines[:boundary]
-    en_lines = lines[boundary:]
-    return ko_lines, en_lines
+    return lines[:boundary], lines[boundary:]
+
+
+def fmt_key(key):
+    return f"#{key[0] + 1} {key[1]}:{key[2]}"
 
 
 def match_verses(ko_verses, en_verses):
     """
-    Pair Korean and English verses by their chapter:verse number.
+    Pair Korean and English verses by (book order, chapter, verse).
     Returns list of (ref_ko, text_ko, ref_en, text_en).
     Prints a report of any unmatched verses.
     """
-    ko_dict = {}
-    for ref, text in ko_verses:
-        num = extract_verse_num(ref)
-        ko_dict[num] = (ref, text)
+    ko_dict = {key: (ref, text) for ref, text, key in ko_verses}
+    en_dict = {key: (ref, text) for ref, text, key in en_verses}
 
-    en_dict = {}
-    for ref, text in en_verses:
-        num = extract_verse_num(ref)
-        en_dict[num] = (ref, text)
-
-    all_nums = sorted(ko_dict.keys() | en_dict.keys(),
-                      key=lambda x: list(map(int, x.split(':'))))
-
-    matched = []
-    only_ko = []
-    only_en = []
-
-    for num in all_nums:
-        if num in ko_dict and num in en_dict:
-            ref_ko, text_ko = ko_dict[num]
-            ref_en, text_en = en_dict[num]
-            matched.append((ref_ko, text_ko, ref_en, text_en))
-        elif num in ko_dict:
-            only_ko.append(num)
+    matched, only_ko, only_en = [], [], []
+    for key in sorted(ko_dict.keys() | en_dict.keys()):
+        if key in ko_dict and key in en_dict:
+            matched.append((*ko_dict[key], *en_dict[key]))
+        elif key in ko_dict:
+            only_ko.append(ko_dict[key][0])
         else:
-            only_en.append(num)
+            only_en.append(en_dict[key][0])
 
     if only_ko:
         print(f"  ⚠  Korean-only verses (no English match): {only_ko}")
     if only_en:
         print(f"  ⚠  English-only verses (no Korean match): {only_en}")
-
     return matched
 
 
