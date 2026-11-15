@@ -1,189 +1,155 @@
+"""BilingualSlideMaker - Windows GUI for make_bilingual_pptx.py
+
+Ways to give it a file:
+  1. Drag the .txt onto the window (needs tkinterdnd2)
+  2. Drag the .txt onto BilingualSlideMaker.exe in File Explorer
+  3. Browse...
+Output defaults to <same folder>/<same name>.pptx
 """
-Simple point-and-click GUI for make_bilingual_pptx.py.
-
-This file does NOT change the conversion logic at all — it imports
-make_bilingual_pptx.py as-is and just calls its existing functions,
-the same way the original command-line script does in main().
-
-Packaged into a Windows .exe via PyInstaller (see the GitHub Actions
-workflow in .github/workflows/build-windows-exe.yml).
-"""
-
-import os
-import sys
+import os, sys, threading, queue
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
 
-from pptx import Presentation
-
 import make_bilingual_pptx as core
+
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    HAVE_DND = True
+except Exception:
+    HAVE_DND = False
 
 
 class TextRedirector:
-    """
-    Sends print() output into the on-screen log box instead of a real
-    console. A windowed .exe (no console window) has no stdout, so any
-    bare print() call — including the "Korean-only / English-only"
-    warnings inside match_verses() — would otherwise crash the app.
-    """
-
-    def __init__(self, widget):
-        self.widget = widget
-
-    def write(self, msg):
-        if not msg:
-            return
-        self.widget.configure(state="normal")
-        self.widget.insert("end", msg)
-        self.widget.see("end")
-        self.widget.configure(state="disabled")
-        self.widget.update_idletasks()
-
-    def flush(self):
-        pass
+    """Send print() output to the on-screen log (a windowed .exe has no console)."""
+    def __init__(self, q): self.q = q
+    def write(self, s):
+        if s: self.q.put(s)
+    def flush(self): pass
 
 
-class App(tk.Tk):
-    ACCENT = "#D4AF37"
-    BG = "#1a1a1a"
-    FG = "white"
+def default_output(in_path):
+    return os.path.splitext(in_path)[0] + ".pptx"
 
-    def __init__(self):
-        super().__init__()
-        self.title("Bilingual Scripture Slide Maker")
-        self.geometry("580x480")
-        self.configure(bg=self.BG)
-        self.resizable(False, False)
 
-        self.input_path = tk.StringVar()
-        self.output_path = tk.StringVar()
+class App:
+    def __init__(self, root):
+        self.root = root
+        root.title("Bilingual Slide Maker")
+        root.geometry("760x560")
+        self.q = queue.Queue()
 
-        tk.Label(
-            self, text="Bilingual Scripture Slide Maker",
-            font=("Segoe UI", 15, "bold"), fg=self.ACCENT, bg=self.BG,
-        ).pack(pady=(18, 6))
+        self.in_var = tk.StringVar()
+        self.out_var = tk.StringVar()
 
-        tk.Label(
-            self, text="1. Choose your combined Korean + English text file",
-            fg=self.FG, bg=self.BG,
-        ).pack(anchor="w", padx=18, pady=(14, 2))
-        row1 = tk.Frame(self, bg=self.BG)
-        row1.pack(fill="x", padx=18)
-        tk.Entry(row1, textvariable=self.input_path, state="readonly").pack(
-            side="left", fill="x", expand=True
-        )
-        tk.Button(row1, text="Browse...", command=self.pick_input).pack(
-            side="left", padx=(8, 0)
-        )
+        self.drop = tk.Label(
+            root, relief="groove", bd=2, height=4, bg="#f4f4f4",
+            text=("Drag & drop the combined .txt file here" if HAVE_DND
+                  else "Click Browse... to choose the combined .txt file"))
+        self.drop.pack(fill="x", padx=12, pady=(12, 6))
 
-        tk.Label(
-            self, text="2. Choose where to save the PowerPoint",
-            fg=self.FG, bg=self.BG,
-        ).pack(anchor="w", padx=18, pady=(14, 2))
-        row2 = tk.Frame(self, bg=self.BG)
-        row2.pack(fill="x", padx=18)
-        tk.Entry(row2, textvariable=self.output_path, state="readonly").pack(
-            side="left", fill="x", expand=True
-        )
-        tk.Button(row2, text="Save As...", command=self.pick_output).pack(
-            side="left", padx=(8, 0)
-        )
+        row1 = tk.Frame(root); row1.pack(fill="x", padx=12, pady=3)
+        tk.Label(row1, text="Input .txt:", width=11, anchor="w").pack(side="left")
+        tk.Entry(row1, textvariable=self.in_var).pack(side="left", fill="x", expand=True)
+        tk.Button(row1, text="Browse...", command=self.browse_in).pack(side="left", padx=(6, 0))
 
-        self.convert_btn = tk.Button(
-            self, text="Convert", command=self.run_conversion,
-            bg=self.ACCENT, fg="black", font=("Segoe UI", 11, "bold"),
-            padx=20, pady=6,
-        )
-        self.convert_btn.pack(pady=18)
+        row2 = tk.Frame(root); row2.pack(fill="x", padx=12, pady=3)
+        tk.Label(row2, text="Save as .pptx:", width=11, anchor="w").pack(side="left")
+        tk.Entry(row2, textvariable=self.out_var).pack(side="left", fill="x", expand=True)
+        tk.Button(row2, text="Save As...", command=self.browse_out).pack(side="left", padx=(6, 0))
 
-        tk.Label(self, text="Status", fg=self.FG, bg=self.BG).pack(
-            anchor="w", padx=18
-        )
-        self.log = scrolledtext.ScrolledText(
-            self, height=12, state="disabled", bg="#0d0d0d", fg="white",
-            insertbackground="white",
-        )
-        self.log.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        self.btn = tk.Button(root, text="Convert", command=self.convert, height=2)
+        self.btn.pack(fill="x", padx=12, pady=8)
 
-        # Route print() (including warnings from inside make_bilingual_pptx.py)
-        # into the log box instead of a nonexistent console.
-        sys.stdout = TextRedirector(self.log)
-        sys.stderr = TextRedirector(self.log)
+        self.log = scrolledtext.ScrolledText(root, height=16, state="disabled", font=("Consolas", 9))
+        self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-    def pick_input(self):
-        path = filedialog.askopenfilename(
-            title="Choose combined Korean + English text file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-        )
-        if path:
-            self.input_path.set(path)
-            if not self.output_path.get():
-                base = os.path.splitext(os.path.basename(path))[0]
-                self.output_path.set(
-                    os.path.join(os.path.dirname(path), f"{base}.pptx")
-                )
+        if HAVE_DND:
+            for w in (root, self.drop):
+                w.drop_target_register(DND_FILES)
+                w.dnd_bind("<<Drop>>", self.on_drop)
 
-    def pick_output(self):
-        path = filedialog.asksaveasfilename(
-            title="Save PowerPoint as",
-            defaultextension=".pptx",
-            filetypes=[("PowerPoint files", "*.pptx")],
-        )
-        if path:
-            self.output_path.set(path)
+        # File dropped onto the .exe icon arrives as argv[1]
+        if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]):
+            self.set_input(sys.argv[1])
 
-    def run_conversion(self):
-        in_file = self.input_path.get()
-        out_file = self.output_path.get()
+        self.poll()
 
-        if not in_file:
-            messagebox.showwarning(
-                "Missing file", "Please choose an input text file first."
-            )
-            return
-        if not out_file:
-            messagebox.showwarning(
-                "Missing output", "Please choose where to save the PowerPoint."
-            )
-            return
+    # ---- input / output handling
+    def set_input(self, path):
+        self.in_var.set(path)
+        self.out_var.set(default_output(path))
+        self.drop.config(text=f"Loaded: {os.path.basename(path)}")
 
-        self.convert_btn.config(state="disabled")
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
+    def on_drop(self, event):
+        files = self.root.tk.splitlist(event.data)   # handles {paths with spaces}
+        if files:
+            self.set_input(files[0])
 
+    def browse_in(self):
+        p = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if p: self.set_input(p)
+
+    def browse_out(self):
+        p = filedialog.asksaveasfilename(defaultextension=".pptx",
+                                         filetypes=[("PowerPoint", "*.pptx")],
+                                         initialfile=os.path.basename(self.out_var.get() or "slides.pptx"))
+        if p: self.out_var.set(p)
+
+    # ---- log
+    def poll(self):
         try:
-            print(f"Parsing {in_file} ...")
-            ko_lines, en_lines = core.split_bilingual_file(in_file)
+            while True:
+                s = self.q.get_nowait()
+                self.log.config(state="normal"); self.log.insert("end", s)
+                self.log.see("end"); self.log.config(state="disabled")
+        except queue.Empty:
+            pass
+        self.root.after(100, self.poll)
 
-            ko_verses = core.parse_verses_from_lines(ko_lines)
-            print(f"  -> {len(ko_verses)} Korean verses after merging")
+    # ---- conversion
+    def convert(self):
+        in_path = self.in_var.get().strip().strip('"')
+        out_path = self.out_var.get().strip().strip('"')
+        if not os.path.isfile(in_path):
+            messagebox.showerror("Input file", "Please choose or drop the input .txt file."); return
+        if not out_path:
+            out_path = default_output(in_path)
+        if not out_path.lower().endswith(".pptx"):
+            out_path += ".pptx"
+        self.out_var.set(out_path)
+        self.btn.config(state="disabled")
+        threading.Thread(target=self.work, args=(in_path, out_path), daemon=True).start()
 
-            en_verses = core.parse_verses_from_lines(en_lines)
-            print(f"  -> {len(en_verses)} English verses after merging")
-
-            print("Matching verses by number...")
-            pairs = core.match_verses(ko_verses, en_verses)
+    def work(self, in_path, out_path):
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = sys.stderr = TextRedirector(self.q)
+        try:
+            from pptx import Presentation
+            print(f"Parsing {in_path} ...")
+            ko_lines, en_lines = core.split_bilingual_file(in_path)
+            ko = core.parse_verses_from_lines(ko_lines)
+            print(f"  -> {len(ko)} Korean verses")
+            en = core.parse_verses_from_lines(en_lines)
+            print(f"  -> {len(en)} English verses")
+            pairs = core.match_verses(ko, en)
             print(f"  -> {len(pairs)} matched pairs")
 
             prs = Presentation()
-            prs.slide_width = core.SLIDE_W
-            prs.slide_height = core.SLIDE_H
-
-            for ref_ko, text_ko, ref_en, text_en in pairs:
-                core.make_slide(prs, ref_ko, text_ko, ref_en, text_en)
-
-            prs.save(out_file)
-            print(f"Done! Saved {len(pairs)} slides -> {out_file}")
-            messagebox.showinfo(
-                "Success", f"Saved {len(pairs)} slides to:\n{out_file}"
-            )
+            prs.slide_width, prs.slide_height = core.SLIDE_W, core.SLIDE_H
+            adjustments = []
+            for ref_ko, t_ko, ref_en, t_en in pairs:
+                adjustments.extend(core.make_slide(prs, ref_ko, t_ko, ref_en, t_en) or [])
+            prs.save(out_path)
+            print(f"Saved {len(pairs)} slides -> {out_path}")
+            core.print_review_summary(adjustments)
         except Exception as e:
-            print(f"ERROR: {e}")
-            messagebox.showerror("Conversion failed", str(e))
+            print(f"\nERROR: {e}")
         finally:
-            self.convert_btn.config(state="normal")
+            sys.stdout, sys.stderr = old_out, old_err
+            self.root.after(0, lambda: self.btn.config(state="normal"))
 
 
 if __name__ == "__main__":
-    App().mainloop()
+    root = TkinterDnD.Tk() if HAVE_DND else tk.Tk()
+    App(root)
+    root.mainloop()

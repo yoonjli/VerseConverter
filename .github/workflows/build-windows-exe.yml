@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - "make_bilingual_pptx.py"
+      - "fix_josa.py"
       - "gui.py"
       - "requirements.txt"
       - ".github/workflows/build-windows-exe.yml"
@@ -30,7 +31,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name BilingualSlideMaker --collect-data pptx gui.py
+          pyinstaller --onefile --windowed --name BilingualSlideMaker --collect-data pptx --collect-all tkinterdnd2 gui.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v7
